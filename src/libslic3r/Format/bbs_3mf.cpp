@@ -6275,7 +6275,7 @@ void PlateData::parse_filament_info(GCodeProcessorResult *result)
                                                 int                             export_plate_idx = -1,
                                                 bool                            plate_thumbnail_written = false,
                                                 bool                            plate_small_thumbnail_written = false) const;
-        bool _add_model_file_to_archive(const std::string& filename, mz_zip_archive& archive, const Model& model, ObjectToObjectDataMap& objects_data, Export3mfProgressFn proFn = nullptr, BBLProject* project = nullptr) const;
+        bool _add_model_file_to_archive(const std::string& filename, mz_zip_archive& archive, const Model& model, ObjectToObjectDataMap& objects_data, Export3mfProgressFn proFn = nullptr, BBLProject* project = nullptr, const std::string& title = {}) const;
         bool _add_object_to_model_stream(mz_zip_writer_staged_context &context, ObjectData const &object_data) const;
         void _add_object_components_to_stream(std::stringstream &stream, ObjectData const &object_data) const;
         //BBS: change volume to seperate objects
@@ -6360,6 +6360,8 @@ void PlateData::parse_filament_info(GCodeProcessorResult *result)
         return result;
     }
 
+    static std::string resolve_title_from_output_path(const std::string& filename);
+
     // backup mesh-only
     bool _BBS_3MF_Exporter::save_object_mesh(const std::string& temp_path, ModelObject const & object, int obj_id)
     {
@@ -6406,7 +6408,7 @@ void PlateData::parse_filament_info(GCodeProcessorResult *result)
             volumes_objectID.insert({volume, (++volume_count << 16 | obj_id)});
         }
 
-        _add_model_file_to_archive(filename.str(), archive, model, objects_data);
+        _add_model_file_to_archive(filename.str(), archive, model, objects_data, nullptr, nullptr, object.name);
 
         mz_zip_writer_finalize_archive(&archive);
         lock.close();
@@ -6682,7 +6684,8 @@ void PlateData::parse_filament_info(GCodeProcessorResult *result)
         ObjectToObjectDataMap objects_data;
         //if (!m_skip_model)
         {
-            if (!_add_model_file_to_archive(filename, archive, model, objects_data, proFn, project)) { return false; }
+            const std::string resolved_title = resolve_title_from_output_path(filename);
+            if (!_add_model_file_to_archive(filename, archive, model, objects_data, proFn, project, resolved_title)) { return false; }
 
             // Adds layer height profile file ("Metadata/Slic3r_PE_layer_heights_profile.txt").
             // All layer height profiles of all ModelObjects are stored here, indexed by 1 based index of the ModelObject in Model.
@@ -7156,7 +7159,19 @@ void PlateData::parse_filament_info(GCodeProcessorResult *result)
     *   save sub model if objects_data is not empty
     *   not collect build items in sub model
     */
-    bool _BBS_3MF_Exporter::_add_model_file_to_archive(const std::string& filename, mz_zip_archive& archive, const Model& model, ObjectToObjectDataMap& objects_data, Export3mfProgressFn proFn, BBLProject* project) const
+    static std::string resolve_title_from_output_path(const std::string& filename)
+    {
+        if (filename.empty())
+            return {};
+
+        boost::filesystem::path title_path(filename);
+        if (title_path.extension() == ".tmp")
+            title_path = title_path.stem();
+
+        return title_path.stem().string();
+    }
+
+    bool _BBS_3MF_Exporter::_add_model_file_to_archive(const std::string& filename, mz_zip_archive& archive, const Model& model, ObjectToObjectDataMap& objects_data, Export3mfProgressFn proFn, BBLProject* project, const std::string& title) const
     {
         bool sub_model = !objects_data.empty();
         bool write_object = sub_model || !m_split_model;
@@ -7199,7 +7214,7 @@ void PlateData::parse_filament_info(GCodeProcessorResult *result)
             stream << ">\n";
 
             std::string origin;
-            std::string name;
+            std::string name = title.empty() ? resolve_title_from_output_path(filename) : title;
             std::string user_name;
             std::string user_id;
             std::string design_cover;
@@ -7226,7 +7241,8 @@ void PlateData::parse_filament_info(GCodeProcessorResult *result)
                 license      = model.model_info->license;
                 description  = model.model_info->description;
                 copyright    = model.model_info->copyright;
-                name         = model.model_info->model_name;
+                if (name.empty())
+                    name = model.model_info->model_name;
                 origin       = model.model_info->origin;
                 BOOST_LOG_TRIVIAL(trace) << "design_info, save_3mf found designer_cover = " << design_cover;
             }
@@ -7238,7 +7254,7 @@ void PlateData::parse_filament_info(GCodeProcessorResult *result)
                     metadata_item_map = model.model_info.get()->metadata_items;
                 }
 
-                metadata_item_map[BBL_MODEL_NAME_TAG]           = xml_escape(name);
+                metadata_item_map[BBL_MODEL_NAME_TAG]           = name;
                 metadata_item_map[BBL_ORIGIN_TAG]               = xml_escape(origin);
                 metadata_item_map[BBL_DESIGNER_TAG]             = xml_escape(user_name);
                 metadata_item_map[BBL_DESIGNER_USER_ID_TAG]     = ""; // Orca: PRIVACY: do not store BBL user id in 3mf
@@ -7479,7 +7495,7 @@ void PlateData::parse_filament_info(GCodeProcessorResult *result)
                     mz_zip_zero_struct(&archive);
                     mz_zip_writer_init_heap(&archive, 0, 1024 * 1024);
                     CNumericLocalesSetter locales_setter;
-                    _add_model_file_to_archive(object_paths[i], archive, model, objects_data2, nullptr, project);
+                    _add_model_file_to_archive(object_paths[i], archive, model, objects_data2, nullptr, project, resolve_title_from_output_path(object_paths[i]));
                     iter->second = objects_data2.begin()->second;
                     void *ppBuf; size_t pSize;
                     mz_zip_writer_finalize_heap_archive(&archive, &ppBuf, &pSize);
