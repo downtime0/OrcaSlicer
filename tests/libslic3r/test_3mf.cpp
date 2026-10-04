@@ -48,6 +48,7 @@
 #ifndef _WIN32
 #include <unistd.h> // geteuid
 #endif
+#include <regex>
 
 #include <catch2/catch_tostring.hpp>
 #include <Eigen/Core>
@@ -110,6 +111,45 @@ namespace Catch {
 
 using namespace Slic3r;
 
+namespace {
+
+std::string read_embedded_title_from_3mf(const std::string &archive_path)
+{
+    mz_zip_archive archive;
+    mz_zip_zero_struct(&archive);
+    if (!open_zip_reader(&archive, archive_path))
+        return {};
+
+    const int model_file_index = mz_zip_reader_locate_file(&archive, "3D/3dmodel.model", nullptr, 0);
+    if (model_file_index < 0) {
+        close_zip_reader(&archive);
+        return {};
+    }
+
+    mz_zip_archive_file_stat stat;
+    if (!mz_zip_reader_file_stat(&archive, static_cast<mz_uint>(model_file_index), &stat)) {
+        close_zip_reader(&archive);
+        return {};
+    }
+
+    std::string xml(static_cast<size_t>(stat.m_uncomp_size), '\0');
+    if (stat.m_uncomp_size > 0 && !mz_zip_reader_extract_to_mem(&archive, static_cast<mz_uint>(model_file_index), xml.data(), static_cast<size_t>(stat.m_uncomp_size), 0)) {
+        close_zip_reader(&archive);
+        return {};
+    }
+
+    close_zip_reader(&archive);
+
+    const std::regex title_re("<metadata\\s+name=\"Title\">([^<]*)</metadata>");
+    std::smatch match;
+    if (!std::regex_search(xml, match, title_re) || match.size() < 2)
+        return {};
+
+    return xml_unescape(match[1].str());
+}
+
+}
+
 
 SCENARIO("Reading 3mf file", "[3mf]") {
     GIVEN("umlauts in the path of the file") {
@@ -123,6 +163,98 @@ SCENARIO("Reading 3mf file", "[3mf]") {
                 REQUIRE(ret);
             }
         }
+    }
+}
+
+SCENARIO("Embedded Title follows .3mf save filename", "[3mf][Title]") {
+    GIVEN("a model saved through the BBS exporter") {
+        Model model;
+        std::string src_file = std::string(TEST_DATA_DIR) + "/test_3mf/Prusa.stl";
+        REQUIRE(load_stl(src_file.c_str(), &model));
+        model.add_default_instances();
+
+        ScopedTemporaryDir backup_dir("orca_title");
+        model.set_backup_path(backup_dir.string());
+
+        DynamicPrintConfig config = DynamicPrintConfig::full_print_config();
+        const std::string test_file =
+            (boost::filesystem::path(backup_dir.string()) / "title_project_name.3mf").string();
+
+        StoreParams store_params;
+        store_params.path = test_file.c_str();
+        store_params.model = &model;
+        store_params.config = &config;
+        store_params.strategy = SaveStrategy::Zip64 | SaveStrategy::Silence;
+
+        REQUIRE(store_bbs_3mf(store_params));
+        REQUIRE(read_embedded_title_from_3mf(test_file) == "title_project_name");
+    }
+}
+
+SCENARIO("Embedded Title follows .gcode.3mf output filename", "[3mf][Title]") {
+    GIVEN("a model exported with gcode mode enabled") {
+        Model model;
+        std::string src_file = std::string(TEST_DATA_DIR) + "/test_3mf/Prusa.stl";
+        REQUIRE(load_stl(src_file.c_str(), &model));
+        model.add_default_instances();
+
+        ScopedTemporaryDir backup_dir("orca_title_gcode");
+        model.set_backup_path(backup_dir.string());
+
+        DynamicPrintConfig config = DynamicPrintConfig::full_print_config();
+        const std::string test_file =
+            (boost::filesystem::path(backup_dir.string()) / "title_plate_job.gcode.3mf").string();
+
+        StoreParams store_params;
+        store_params.path = test_file.c_str();
+        store_params.model = &model;
+        store_params.config = &config;
+        store_params.strategy = SaveStrategy::Zip64 | SaveStrategy::Silence | SaveStrategy::WithGcode;
+
+        REQUIRE(store_bbs_3mf(store_params));
+        REQUIRE(read_embedded_title_from_3mf(test_file) == "title_plate_job.gcode");
+    }
+}
+
+SCENARIO("Embedded Title escapes special filename characters once", "[3mf][Title]") {
+    GIVEN("a model saved with an ampersand in its output filename") {
+        Model model;
+        std::string src_file = std::string(TEST_DATA_DIR) + "/test_3mf/Prusa.stl";
+        REQUIRE(load_stl(src_file.c_str(), &model));
+        model.add_default_instances();
+
+        ScopedTemporaryDir backup_dir("orca_title_escape");
+        model.set_backup_path(backup_dir.string());
+
+        DynamicPrintConfig config = DynamicPrintConfig::full_print_config();
+        const std::string test_file =
+            (boost::filesystem::path(backup_dir.string()) / "title_A&B.3mf").string();
+
+        StoreParams store_params;
+        store_params.path = test_file.c_str();
+        store_params.model = &model;
+        store_params.config = &config;
+        store_params.strategy = SaveStrategy::Zip64 | SaveStrategy::Silence;
+
+        REQUIRE(store_bbs_3mf(store_params));
+        REQUIRE(read_embedded_title_from_3mf(test_file) == "title_A&B");
+
+        Model reloaded_model;
+        ScopedTemporaryDir reload_backup_dir("orca_title_reload");
+        reloaded_model.set_backup_path(reload_backup_dir.string());
+        DynamicPrintConfig reloaded_config;
+        ConfigSubstitutionContext ctxt{ ForwardCompatibilitySubstitutionRule::Disable };
+        PlateDataPtrs reloaded_plates;
+        std::vector<Preset*> project_presets;
+        bool is_bbl_3mf = false;
+        bool is_orca_3mf = false;
+        Semver file_version;
+        REQUIRE(load_bbs_3mf(test_file.c_str(), &reloaded_config, &ctxt, &reloaded_model, &reloaded_plates,
+                             &project_presets, &is_bbl_3mf, &is_orca_3mf, &file_version, nullptr,
+                             LoadStrategy::LoadModel | LoadStrategy::LoadConfig));
+        REQUIRE(reloaded_model.model_info);
+        REQUIRE(reloaded_model.model_info->model_name == "title_A&B");
+        release_PlateData_list(reloaded_plates);
     }
 }
 
