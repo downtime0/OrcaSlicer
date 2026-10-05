@@ -297,6 +297,8 @@ struct StoreParams
     std::vector<PlateBBoxData*> id_bboxes;
     BBLProject* project = nullptr;
     BBLProfile* profile = nullptr;
+    // Optional user-facing filename used to derive the embedded Title for send/print exports.
+    std::string title;
 
     StoreParams() {}
 };

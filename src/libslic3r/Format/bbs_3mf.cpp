@@ -6228,6 +6228,7 @@ void PlateData::parse_filament_info(GCodeProcessorResult *result)
         bool m_skip_auxiliary { false };    // skip normal axuiliary files
         bool m_minimal_published { false }; // published 3MF: omit the project config, the embedded preset files and the slicer tags
         bool m_use_loaded_id { false };        // whether to use loaded id for identify_id
+        std::string m_title;
         bool m_share_mesh { false };        // whether to share mesh between objects
         std::string m_thumbnail_middle = PRINTER_THUMBNAIL_MIDDLE_FILE;
         std::string m_thumbnail_small  = PRINTER_THUMBNAIL_SMALL_FILE;
@@ -6332,6 +6333,7 @@ void PlateData::parse_filament_info(GCodeProcessorResult *result)
         m_minimal_published = store_params.strategy & SaveStrategy::MinimalPublished;
 
         m_use_loaded_id = store_params.strategy & SaveStrategy::UseLoadedId;
+        m_title = store_params.title;
 
         if (auto info = store_params.model->model_info) {
             if (auto iter = info->metadata_items.find("Thumbnail_Small"); iter != info->metadata_items.end())
@@ -6684,7 +6686,7 @@ void PlateData::parse_filament_info(GCodeProcessorResult *result)
         ObjectToObjectDataMap objects_data;
         //if (!m_skip_model)
         {
-            const std::string resolved_title = resolve_title_from_output_path(filename);
+            const std::string resolved_title = m_title.empty() ? resolve_title_from_output_path(filename) : m_title;
             if (!_add_model_file_to_archive(filename, archive, model, objects_data, proFn, project, resolved_title)) { return false; }
 
             // Adds layer height profile file ("Metadata/Slic3r_PE_layer_heights_profile.txt").
