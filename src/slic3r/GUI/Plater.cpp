@@ -20322,7 +20322,7 @@ void publish(Model &model, SaveStrategy strategy) {
 }
 
 // BBS: backup
-int Plater::export_3mf(const boost::filesystem::path& output_path, SaveStrategy strategy, int export_plate_idx, Export3mfProgressFn proFn)
+int Plater::export_3mf(const boost::filesystem::path& output_path, SaveStrategy strategy, int export_plate_idx, Export3mfProgressFn proFn, const std::string& title)
 {
     int ret = 0;
     //if (p->model.objects.empty()) {
@@ -20498,6 +20498,7 @@ int Plater::export_3mf(const boost::filesystem::path& output_path, SaveStrategy 
     store_params.proFn = proFn;
     store_params.id_bboxes = plate_bboxes;//BBS
     store_params.project = &p->project;
+    store_params.title = title;
     store_params.strategy = strategy | SaveStrategy::Zip64;
 
 
@@ -21098,7 +21099,10 @@ int Plater::send_gcode(int plate_idx, Export3mfProgressFn proFn)
         strategy = SaveStrategy::Silence | SaveStrategy::SplitModel | SaveStrategy::WithGcode;
 #endif
 
-    result = export_3mf(p->m_print_job_data._3mf_path, strategy, plate_idx, proFn);
+    // Send dialogs use this generated filename, so keep the embedded Title in sync instead
+    // of exposing the internal temporary archive name.
+    const std::string title = into_u8(p->get_export_gcode_filename(wxEmptyString, true));
+    result = export_3mf(p->m_print_job_data._3mf_path, strategy, plate_idx, proFn, title);
 
     return result;
 }

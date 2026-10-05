@@ -214,6 +214,32 @@ SCENARIO("Embedded Title follows .gcode.3mf output filename", "[3mf][Title]") {
     }
 }
 
+SCENARIO("Embedded Title follows the user-facing send filename", "[3mf][Title]") {
+    GIVEN("a send archive written to an internal temporary filename") {
+        Model model;
+        std::string src_file = std::string(TEST_DATA_DIR) + "/test_3mf/Prusa.stl";
+        REQUIRE(load_stl(src_file.c_str(), &model));
+        model.add_default_instances();
+
+        ScopedTemporaryDir backup_dir("orca_title_send");
+        model.set_backup_path(backup_dir.string());
+
+        DynamicPrintConfig config = DynamicPrintConfig::full_print_config();
+        const std::string test_file =
+            (boost::filesystem::path(backup_dir.string()) / ".1131442.0.3mf").string();
+
+        StoreParams store_params;
+        store_params.path = test_file.c_str();
+        store_params.model = &model;
+        store_params.config = &config;
+        store_params.title = "Disk";
+        store_params.strategy = SaveStrategy::Zip64 | SaveStrategy::Silence | SaveStrategy::WithGcode;
+
+        REQUIRE(store_bbs_3mf(store_params));
+        REQUIRE(read_embedded_title_from_3mf(test_file) == "Disk");
+    }
+}
+
 SCENARIO("Embedded Title escapes special filename characters once", "[3mf][Title]") {
     GIVEN("a model saved with an ampersand in its output filename") {
         Model model;
