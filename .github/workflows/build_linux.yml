@@ -47,7 +47,7 @@ jobs:
       matrix:
         include: ${{ fromJSON(vars.SELF_HOSTED
           && '[{"arch":"","os":"orca-lnx-server"}]'
-          || '[{"arch":"","os":"ubuntu-24.04"},{"arch":"aarch64","os":"ubuntu-24.04-arm"}]') }}
+          || '[{"arch":"","os":"ubuntu-26.04"},{"arch":"aarch64","os":"ubuntu-26.04-arm"}]') }}
     if: ${{ !cancelled() && (github.event_name != 'schedule' || github.repository == 'OrcaSlicer/OrcaSlicer') }}
     uses: ./.github/workflows/build_check_cache.yml
     with:
@@ -62,7 +62,7 @@ jobs:
     if: ${{ !cancelled() && success() }}
     uses: ./.github/workflows/unit_tests.yml
     with:
-      os: ${{ vars.SELF_HOSTED && 'orca-lnx-server' || 'ubuntu-24.04' }}
+      os: ${{ vars.SELF_HOSTED && 'orca-lnx-server' || 'ubuntu-26.04' }}
       artifact: ${{ github.sha }}-tests-linux-x86_64
 
   unit_tests_linux_aarch64:
@@ -71,7 +71,7 @@ jobs:
     if: ${{ !cancelled() && success() && !vars.SELF_HOSTED }}
     uses: ./.github/workflows/unit_tests.yml
     with:
-      os: ubuntu-24.04-arm
+      os: ubuntu-26.04-arm
       artifact: ${{ github.sha }}-tests-linux-aarch64
 
   # Slice a two-colour cube through the shipped profiles with the Linux
@@ -80,7 +80,7 @@ jobs:
     name: Slice check (Linux ${{ vars.SELF_HOSTED && 'x86_64' || 'aarch64' }})
     needs: build_linux
     if: ${{ !cancelled() && success() }}
-    runs-on: ${{ vars.SELF_HOSTED && 'orca-lnx-server' || 'ubuntu-24.04-arm' }}
+    runs-on: ${{ vars.SELF_HOSTED && 'orca-lnx-server' || 'ubuntu-26.04-arm' }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
@@ -111,9 +111,9 @@ jobs:
       matrix:
         variant:
           - arch: x86_64
-            runner: ubuntu-24.04
+            runner: ubuntu-26.04
           - arch: aarch64
-            runner: ubuntu-24.04-arm
+            runner: ubuntu-26.04-arm
     # Flatpak is hosted-only because the container is not available on the
     # self-hosted Linux runner.
     if: ${{ !cancelled() && !vars.SELF_HOSTED }}
@@ -294,7 +294,7 @@ jobs:
     if: ${{ !cancelled() && success() }}
     uses: ./.github/workflows/unit_tests_flatpak.yml
     with:
-      os: ubuntu-24.04
+      os: ubuntu-26.04
       artifact: ${{ github.sha }}-flatpak-tests-x86_64
 
   unit_tests_flatpak_aarch64:
@@ -303,14 +303,14 @@ jobs:
     if: ${{ !cancelled() && success() }}
     uses: ./.github/workflows/unit_tests_flatpak.yml
     with:
-      os: ubuntu-24.04-arm
+      os: ubuntu-26.04-arm
       artifact: ${{ github.sha }}-flatpak-tests-aarch64
 
   publish_test_results:
     name: Publish Linux test results
     needs: [unit_tests_linux_x86_64, unit_tests_linux_aarch64, unit_tests_flatpak_x86_64, unit_tests_flatpak_aarch64]
     if: ${{ !cancelled() }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - name: Download Test Results
         uses: actions/download-artifact@v8
