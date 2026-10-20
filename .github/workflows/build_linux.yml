@@ -1,0 +1,119 @@
+name: Build Linux only
+
+# This workflow is intentionally independent from build_all.yml. It is useful
+# for validating the Linux build on a branch or pull request without spending
+# Windows/macOS runner time.
+on:
+  push:
+    branches:
+      - 'ci/linux-only-*'
+  pull_request:
+    branches:
+      - main
+      - 'release/*'
+    paths:
+      - 'deps/**'
+      - 'deps_src/**'
+      - 'cmake/**'
+      - 'src/**'
+      - '**/CMakeLists.txt'
+      - 'version.inc'
+      - 'localization/**'
+      - 'resources/**'
+      - '.github/workflows/build_*.yml'
+      - '.github/workflows/unit_tests*.yml'
+      - 'build_linux.sh'
+      - 'scripts/build_preset_cache.*'
+      - 'scripts/flatpak/**'
+      - 'tests/**'
+  workflow_dispatch:
+    inputs:
+      build-deps-only:
+        description: 'Only build dependencies (bypasses caching)'
+        type: boolean
+        default: false
+
+concurrency:
+  group: build-linux-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build_linux:
+    strategy:
+      fail-fast: false
+      # SELF_HOSTED skips arm64 because no arm self-hosted server is available.
+      # The empty amd64 arch preserves the existing linux-clang cache key and
+      # unsuffixed artifact names.
+      matrix:
+        include: ${{ fromJSON(vars.SELF_HOSTED
+          && '[{"arch":"","os":"orca-lnx-server"}]'
+          || '[{"arch":"","os":"ubuntu-24.04"},{"arch":"aarch64","os":"ubuntu-24.04-arm"}]') }}
+    if: ${{ !cancelled() && (github.event_name != 'schedule' || github.repository == 'OrcaSlicer/OrcaSlicer') }}
+    uses: ./.github/workflows/build_check_cache.yml
+    with:
+      os: ${{ matrix.os }}
+      arch: ${{ matrix.arch }}
+      build-deps-only: ${{ inputs.build-deps-only || false }}
+    secrets: inherit
+
+  unit_tests_linux_x86_64:
+    name: Linux x86_64
+    needs: build_linux
+    if: ${{ !cancelled() && success() }}
+    uses: ./.github/workflows/unit_tests.yml
+    with:
+      os: ${{ vars.SELF_HOSTED && 'orca-lnx-server' || 'ubuntu-24.04' }}
+      artifact: ${{ github.sha }}-tests-linux-x86_64
+
+  unit_tests_linux_aarch64:
+    name: Linux aarch64
+    needs: build_linux
+    if: ${{ !cancelled() && success() && !vars.SELF_HOSTED }}
+    uses: ./.github/workflows/unit_tests.yml
+    with:
+      os: ubuntu-24.04-arm
+      artifact: ${{ github.sha }}-tests-linux-aarch64
+
+  # Slice a two-colour cube through the shipped profiles with the Linux
+  # validator produced by build_linux.
+  slice_check_linux:
+    name: Slice check (Linux ${{ vars.SELF_HOSTED && 'x86_64' || 'aarch64' }})
+    needs: build_linux
+    if: ${{ !cancelled() && success() }}
+    runs-on: ${{ vars.SELF_HOSTED && 'orca-lnx-server' || 'ubuntu-24.04-arm' }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+      - name: Download profile validator
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ github.sha }}-profile-validator-linux-${{ vars.SELF_HOSTED && 'x86_64' || 'aarch64' }}
+          path: validator-bin
+      - name: Validate slice (expand custom g-code)
+        timeout-minutes: 60
+        run: |
+          chmod +x validator-bin/OrcaSlicer_profile_validator
+          ./validator-bin/OrcaSlicer_profile_validator -p "${{ github.workspace }}/resources/profiles" -s -l 2
+
+  publish_test_results:
+    name: Publish Linux test results
+    needs: [unit_tests_linux_x86_64, unit_tests_linux_aarch64]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download Test Results
+        uses: actions/download-artifact@v8
+        with:
+          pattern: test-results-*
+          path: test-results
+      - name: Publish Test Results
+        continue-on-error: true
+        uses: EnricoMi/publish-unit-test-result-action@v2
+        with:
+          files: 'test-results/**/*.xml'
+      - name: Delete Test Results
+        if: success()
+        uses: geekyeggo/delete-artifact@v6
+        with:
+          name: test-results-*
+          failOnError: false
